@@ -12,10 +12,10 @@ class ComplaintController extends Controller
     // 📌 Ambil semua aduan milik user
     public function index()
     {
-        return Complaint::with('images')
+        return ComplaintResource::collection(Complaint::with('images')
             ->where('user_id', auth()->id())
             ->latest()
-            ->get();
+            ->get());
     }
 
     // 📌 Buat aduan baru
@@ -29,11 +29,36 @@ class ComplaintController extends Controller
 
         $complaint = Complaint::create($validated);
 
-        return response()->json([
-            'message' => 'Complaint created',
-            'data' => $complaint
-        ], 201);
+        return (new ComplaintResource($complaint))
+            ->additional([
+                'message' => 'Aduan berhasil ditambahkan',
+            ])
+            ->response()
+            ->setStatusCode(201);
     }
+
+    // Update aduan
+    public function update(Request $request, $id)
+    {
+        $complaint = Complaint::where('user_id', auth()->id())
+            ->findOrFail($id);
+
+        $validated = $request->validate([
+            'title' => 'sometimes|string|max:255',
+            'description' => 'sometimes|string',
+            'location' => 'nullable|string',
+        ]);
+
+        $complaint->update($validated);
+
+        return (new ComplaintResource($complaint))
+            ->additional([
+                'message' => 'Aduan berhasil diupdate',
+            ])
+            ->response()
+            ->setStatusCode(200);
+    }
+    
 
     // 📌 Detail aduan
     public function show($id)
@@ -42,7 +67,9 @@ class ComplaintController extends Controller
             ->where('user_id', auth()->id())
             ->findOrFail($id);
 
-        return response()->json($complaint);
+        return (new ComplaintResource($complaint))
+            ->response()
+            ->setStatusCode(200);
     }
 
     // 📌 Hapus (soft delete)
