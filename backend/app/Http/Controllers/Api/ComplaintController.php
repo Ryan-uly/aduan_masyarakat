@@ -6,28 +6,47 @@ use App\Http\Controllers\Controller;
 use App\Models\Complaint;
 use App\Models\ComplaintImage;
 use Illuminate\Http\Request;
+use App\Http\Requests\CreateComplaintRequest;
+use App\Http\Requests\UpdateComplaintRequest;
+use App\Http\Resources\ComplaintResource;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Facades\DB;
 
 class ComplaintController extends Controller
 {
+    use AuthorizesRequests;
     // 📌 Ambil semua aduan milik user
-    public function index()
+    public function index(Request $request)
     {
-        return ComplaintResource::collection(Complaint::with('images')
+        $complaints = Complaint::with('images')
             ->where('user_id', auth()->id())
             ->latest()
-            ->get());
+            ->paginate(10);
+
+        return ComplaintResource::collection($complaints);
     }
 
     // 📌 Buat aduan baru
-    public function store(Request $request)
+    public function store(CreateComplaintRequest $request)
     {
-        $validated = $request->validate([
-            'title' => 'required|string|max:255',
-            'description' => 'required|string',
-            'location' => 'nullable|string'
-        ]);
+        DB::transaction(function () use ($request,&$complaint) {
+            $complaint = Complaint::create($request->validated());
 
-        $complaint = Complaint::create($validated);
+            if ($request->hasFile('images')) {
+                foreach ($request->file('images') as $image) {
+
+                    $path = $image->store(
+                        "complaints/{$complaint->user_id}/{$complaint->id}",
+                        'public'
+                    );
+
+                    $complaint->images()->create([
+                        'image_path' => $path
+                    ]);
+                }
+            }
+        $complaint->load('images');
+        });
 
         return (new ComplaintResource($complaint))
             ->additional([
@@ -38,18 +57,29 @@ class ComplaintController extends Controller
     }
 
     // Update aduan
-    public function update(Request $request, $id)
+    public function update(UpdateComplaintRequest $request, $id)
     {
-        $complaint = Complaint::where('user_id', auth()->id())
-            ->findOrFail($id);
+        DB::transaction(function () use ($request,&$complaint) {
+            $complaint = Complaint::findOrFail($id);
+            $this->authorize('update', $complaint);
 
-        $validated = $request->validate([
-            'title' => 'sometimes|string|max:255',
-            'description' => 'sometimes|string',
-            'location' => 'nullable|string',
-        ]);
+            $complaint->update($request->validated());
 
-        $complaint->update($validated);
+            if ($request->hasFile('images')) {
+                foreach ($request->file('images') as $image) {
+
+                    $path = $image->store(
+                        "complaints/{$complaint->user_id}/{$complaint->id}",
+                        'public'
+                    );
+
+                    $complaint->images()->create([
+                        'image_path' => $path
+                    ]);
+                }
+            }
+            $complaint->load('images');
+        });
 
         return (new ComplaintResource($complaint))
             ->additional([
@@ -63,10 +93,8 @@ class ComplaintController extends Controller
     // 📌 Detail aduan
     public function show($id)
     {
-        $complaint = Complaint::with('images')
-            ->where('user_id', auth()->id())
-            ->findOrFail($id);
-
+        $complaint = Complaint::with('images')->findOrFail($id);
+        $this->authorize('view', $complaint);
         return (new ComplaintResource($complaint))
             ->response()
             ->setStatusCode(200);
@@ -75,8 +103,8 @@ class ComplaintController extends Controller
     // 📌 Hapus (soft delete)
     public function destroy($id)
     {
-        $complaint = Complaint::where('user_id', auth()->id())
-            ->findOrFail($id);
+        $complaint = Complaint::findOrFail($id);
+        $this->authorize('delete', $complaint);
 
         $complaint->delete();
 
@@ -86,25 +114,32 @@ class ComplaintController extends Controller
     }
 
     // 📌 Upload gambar
-    public function uploadImage(Request $request, $id)
+    public function uploadImages(Request $request, Complaint $complaint)
     {
+        // dd($request->all(), $request->file('images'));
+        $this->authorize('update', $complaint);  
         $request->validate([
-            'image' => 'required|image|max:2048'
+            'images' => 'required|array|max:5',
+            'images.*' => 'image|mimes:jpeg,png,jpg|max:2048'
         ]);
 
-        $complaint = Complaint::where('user_id', auth()->id())
-            ->findOrFail($id);
+        foreach ($request->file('images') as $image) {
 
-        $path = $request->file('image')->store('complaints', 'public');
+            $path = $image->storePublicly(
+                "complaints/{$complaint->user_id}/{$complaint->id}",
+                'public'
+            );
 
-        $image = ComplaintImage::create([
-            'complaint_id' => $complaint->id,
-            'image_path' => $path
-        ]);
+            $complaint->images()->create([
+                'image_path' => $path
+            ]);
+        }
 
-        return response()->json([
-            'message' => 'Image uploaded',
-            'data' => $image
-        ]);
+        $complaint->load('images');
+
+        return (new ComplaintResource($complaint))
+            ->additional([
+                'message' => 'Images uploaded successfully'
+            ]);
     }
 }

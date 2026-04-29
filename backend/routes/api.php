@@ -24,7 +24,8 @@ Route::prefix('v1')
             Route::put('/complaints/{id}', [ComplaintController::class, 'update'])->name('complaints.update');
             Route::delete('/complaints/{id}', [ComplaintController::class, 'destroy'])->name('complaints.destroy');
 
-            Route::post('/complaints/{id}/images', [ComplaintController::class, 'uploadImage'])->name('complaints.images');
+            Route::post('/complaints/{complaint}/images', [ComplaintController::class, 'uploadImages'])
+                ->name('complaints.images');
         });
 
     });
